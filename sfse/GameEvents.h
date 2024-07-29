@@ -685,7 +685,10 @@ struct TESEscortWaitStartEvent {};
 struct TESEscortWaitStopEvent {};
 struct TESExitBleedoutEvent {};
 struct TESExitFurnitureEvent {};
-struct TESFormDeleteEvent {};
+struct TESFormDeleteEvent
+{
+    u32 formId; //00
+};
 struct TESFormIDRemapEvent
 {
     u32 oldID;  //00

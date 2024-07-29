@@ -4,23 +4,30 @@
 #include "sfse_common/Log.h"
 #include "sfse_common/Errors.h"
 #include "sfse_common/sfse_version.h"
+#include "sfse_common/FileStream.h"
 #include "sfse/GameSettings.h"
 
 #include <ShlObj.h>
 #include <unordered_map>
+#include <unordered_set>
+#include <io.h>
 
 namespace Serialization
 {
 	const char* kSavegamePath = "\\My Games\\" SAVE_FOLDER_NAME "\\";
 
 	std::unordered_map<u32, u32> changedIDs;
+	std::unordered_set<u32> deletedIDs;
 	std::string s_savePath;
 
-	struct IDRemapListener : public BSTEventSink<TESFormIDRemapEvent>
+	struct IDRemapDeleteListener :
+		public BSTEventSink<TESFormIDRemapEvent>,
+		public BSTEventSink<TESFormDeleteEvent>
 	{
-		IDRemapListener()
+		IDRemapDeleteListener()
 		{
-			GetEventSource<TESFormIDRemapEvent>()->RegisterSink(this);
+			GetEventSource<TESFormIDRemapEvent>()->RegisterSink(static_cast<BSTEventSink<TESFormIDRemapEvent>*>(this));
+			GetEventSource<TESFormDeleteEvent>()->RegisterSink(static_cast<BSTEventSink<TESFormDeleteEvent>*>(this));
 		}
 
 		virtual	EventResult	ProcessEvent(const TESFormIDRemapEvent& arEvent, BSTEventSource<TESFormIDRemapEvent>* eventSource)
@@ -28,16 +35,27 @@ namespace Serialization
 			changedIDs[arEvent.oldID] = arEvent.newID;
 			return EventResult::kContinue;
 		};
+
+		virtual	EventResult	ProcessEvent(const TESFormDeleteEvent& arEvent, BSTEventSource<TESFormDeleteEvent>* eventSource)
+		{
+			deletedIDs.insert(arEvent.formId);
+			return EventResult::kContinue;
+		};
 	};
+
+	void RemoveFileExtension(std::string& path)
+	{
+		size_t lastDot = path.find_last_of('.');
+		if (lastDot != std::string::npos) {
+			path.erase(lastDot);
+		}
+	}
 
 	std::string MakeSavePath(std::string name, const char* extension, bool hasExtension)
 	{
 		if (hasExtension)
 		{
-			size_t lastDot = name.find_last_of('.');
-			if (lastDot != std::string::npos) {
-				name.erase(lastDot);
-			}
+			RemoveFileExtension(name);
 		}
 
 		char path[MAX_PATH];
@@ -76,12 +94,15 @@ namespace Serialization
 	void HandleBeginLoad()
 	{
 		//if the remap listener isn't already registered, register it now.
-		static IDRemapListener listener{};
+		static IDRemapDeleteListener listener{};
+		changedIDs.clear();
+		deletedIDs.clear();
 	}
 
 	void HandleEndLoad()
 	{
 		changedIDs.clear();
+		deletedIDs.clear();
 	}
 
 	bool ResolveFormId(u32 formId, u32* formIdOut)
@@ -90,9 +111,14 @@ namespace Serialization
 			(*formIdOut) = iter->second;
 			return true;
 		}
-		else
+		
+		if (deletedIDs.find(formId) == deletedIDs.end())
 		{
 			(*formIdOut) = formId;
+			return true;
+		}
+		else
+		{
 			return false;
 		}
 	}
@@ -104,9 +130,14 @@ namespace Serialization
 			(*handleOut) = (handle & 0xFFFFFFFF00000000) | static_cast<u64>(iter->second);
 			return true;
 		}
-		else
+
+		if (deletedIDs.find(formId) == deletedIDs.end())
 		{
 			(*handleOut) = handle;
+			return true;
+		}
+		else
+		{
 			return false;
 		}
 	}
@@ -132,10 +163,20 @@ namespace Serialization
 		//TODO: add implementation for deserialization & load callbacks.
 	}
 
-	void HandleDeleteSave(std::string saveName)
+	void HandleDeleteSave(std::string filePath)
 	{
+		//check if old file is gone
+		FileStream saveFile;
+		if (!saveFile.open(filePath.c_str()))
+		{
+			RemoveFileExtension(filePath);
+			filePath += ".sfse";
+			_MESSAGE("deleting co-save %s", filePath.c_str());
+			DeleteFile(filePath.c_str());
+		}
+		else
+		{
+			_MESSAGE("skipped delete of co-save for file %s", filePath.c_str());
+		}
 	}
-
-
-
 }

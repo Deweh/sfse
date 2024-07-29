@@ -13,5 +13,5 @@ namespace Serialization
 	void HandleSaveGlobalData();
 	void HandleLoadGlobalData();
 
-	void HandleDeleteSave(std::string saveName);
+	void HandleDeleteSave(std::string filePath);
 }

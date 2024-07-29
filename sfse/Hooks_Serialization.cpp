@@ -10,6 +10,7 @@
 #include "xbyak/xbyak.h"
 
 class BGSSaveLoadGame;
+class BGSSaveLoadManager;
 
 typedef void (*_SaveGame)(BGSSaveLoadGame* a_this, void* a_unk1, void* a_unk2, const char* a_name);
 RelocAddr <_SaveGame> SaveGame_Call(0x024ACCB0 + 0x12B);
@@ -18,6 +19,10 @@ RelocAddr <_SaveGame> SaveGame_Original(0x024AFCC0);
 typedef bool (*_LoadGame)(BGSSaveLoadGame* a_this, const char* a_name, void* a_unk1, void* a_unk2);
 RelocAddr <_LoadGame> LoadGame_Call(0x024DFF80 + 0x572);
 RelocAddr <_LoadGame> LoadGame_Original(0x024B55B0);
+
+typedef bool (*_DeleteSaveFile)(const char* a_filePath);
+RelocAddr <_DeleteSaveFile> DeleteSaveFile_Call(0x024DF75C + 0x65);
+RelocAddr <_DeleteSaveFile> DeleteSaveFile_Original(0x024DE118);
 
 typedef bool (*_VM_SaveGame)(void* a_this, void* a_storage, void* a_handleReaderWriter, bool a_flag);
 typedef bool (*_VM_LoadGame)(void* a_this, void* a_storage, void* a_handleReaderWriter, bool* a_flag, bool* b_flag);
@@ -30,9 +35,9 @@ RelocAddr <uintptr_t> VirtualMachine_IVMSaveLoadInterface_VTable(0x0545A240);
 void SaveGame_Hook(BGSSaveLoadGame* a_this, void* a_unk1, void* a_unk2, const char* a_name)
 {
 	Serialization::SetSaveName(a_name, true);
-	PluginManager::dispatchMessage(0, SFSEMessagingInterface::kMessage_PreSaveGame, (void*)a_name, strlen(a_name), NULL);
+	PluginManager::dispatchMessage(0, SFSEMessagingInterface::kMessage_PreSaveGame, (void*)a_name, (u32)strlen(a_name), NULL);
 	SaveGame_Original(a_this, a_unk1, a_unk2, a_name);
-	PluginManager::dispatchMessage(0, SFSEMessagingInterface::kMessage_PostSaveGame, (void*)a_name, strlen(a_name), NULL);
+	PluginManager::dispatchMessage(0, SFSEMessagingInterface::kMessage_PostSaveGame, (void*)a_name, (u32)strlen(a_name), NULL);
 	Serialization::SetSaveName(NULL);
 }
 
@@ -40,11 +45,18 @@ bool LoadGame_Hook(BGSSaveLoadGame* a_this, const char* a_name, void* a_unk1, vo
 {
 	Serialization::SetSaveName(a_name, false);
 	Serialization::HandleBeginLoad();
-	PluginManager::dispatchMessage(0, SFSEMessagingInterface::kMessage_PreLoadGame, (void*)a_name, strlen(a_name), NULL);
+	PluginManager::dispatchMessage(0, SFSEMessagingInterface::kMessage_PreLoadGame, (void*)a_name, (u32)strlen(a_name), NULL);
 	bool result = LoadGame_Original(a_this, a_name, a_unk1, a_unk2);
-	PluginManager::dispatchMessage(0, SFSEMessagingInterface::kMessage_PostLoadGame, (void*)a_name, strlen(a_name), NULL);
+	PluginManager::dispatchMessage(0, SFSEMessagingInterface::kMessage_PostLoadGame, (void*)a_name, (u32)strlen(a_name), NULL);
 	Serialization::HandleEndLoad();
 	Serialization::SetSaveName(NULL);
+	return result;
+}
+
+bool DeleteSaveFile_Hook(const char* a_filePath)
+{
+	bool result = DeleteSaveFile_Original(a_filePath);
+	Serialization::HandleDeleteSave(a_filePath);
 	return result;
 }
 
@@ -71,9 +83,10 @@ bool VM_LoadGame_Hook(void* a_this, void* a_storage, void* a_handleReaderWriter,
 
 void Hooks_Serialization_Apply()
 {
-	//write call hooks for SaveGame and LoadGame
+	//write call hooks for SaveGame, LoadGame & DeleteSaveFile
 	g_branchTrampoline.write5Call(SaveGame_Call.getUIntPtr(), (uintptr_t)SaveGame_Hook);
 	g_branchTrampoline.write5Call(LoadGame_Call.getUIntPtr(), (uintptr_t)LoadGame_Hook);
+	g_branchTrampoline.write5Call(DeleteSaveFile_Call.getUIntPtr(), (uintptr_t)DeleteSaveFile_Hook);
 
 	//get pointers to IVMSaveLoadInterface vfunc entries
 	uintptr_t VM_SaveGame_VFunc = VirtualMachine_IVMSaveLoadInterface_VTable.getUIntPtr() + (0x1 * 0x8);
